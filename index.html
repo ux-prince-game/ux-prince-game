@@ -58,7 +58,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 50px 8px 24px; /* 右側に中断ボタン分の余白を確保 */
+      padding: 16px 50px 8px 24px;
       background: #ffffff;
       pointer-events: none;
     }
@@ -78,7 +78,7 @@
       margin-left: 4px;
     }
 
-    /* 画面右上の中断（ポーズ）ボタン */
+    /* 中断ボタン */
     #btn-pause {
       position: absolute;
       top: 14px;
@@ -250,7 +250,6 @@
     .skill-title { font-weight: 700; color: #1c1c1e; font-size: 13px; }
     .skill-desc { font-size: 11px; color: #636366; margin-top: 2px; }
 
-    /* ボタン群 */
     .btn-group-row {
       display: flex;
       gap: 10px;
@@ -394,7 +393,6 @@
 <body>
 
   <div id="game-container">
-    <!-- 右上の中断ボタン -->
     <button id="btn-pause" class="hidden">⏸</button>
 
     <!-- HUD -->
@@ -433,21 +431,21 @@
     <!-- スタート画面 -->
     <div id="start-screen" class="screen-overlay">
       <h1>UX王子ゲーム</h1>
-      <p class="subtitle">「U・X・王・子」を順番通りに連打しよう！<br>間違えた文字や黒い偽文字を押すとコンボリセット！<br>10コンボごとに時間が <b>+3秒</b> 回復！</p>
+      <p class="subtitle">「U・X・王・子」を被らないように集めよう！<br>既にセットした文字や黒い偽文字を押すとコンボリセット！<br>10コンボごとに時間が <b>+3秒</b> 回復！</p>
 
       <div style="font-size:11px; font-weight:700; color:#8e8e93; margin-bottom:6px; letter-spacing:0.5px;">SKILL SELECT</div>
       <div class="skill-select-group">
         <div class="skill-card selected" data-skill="fever">
           <div class="skill-title">1. フィーバー型 (CT: 20秒)</div>
-          <div class="skill-desc">6秒間、獲得ポイントとコンボ増加量が2倍</div>
+          <div class="skill-desc">10秒間、獲得ポイントとコンボ増加量が2倍</div>
         </div>
         <div class="skill-card" data-skill="allmighty">
           <div class="skill-title">2. オールマイティ型 (CT: 30秒)</div>
-          <div class="skill-desc">6秒間、どの文字を取っても順番が進みコンボ継続</div>
+          <div class="skill-desc">10秒間、重複しても未取得扱い＆コンボ継続</div>
         </div>
         <div class="skill-card" data-skill="highrisk">
           <div class="skill-title">3. ハイリスク型 (CT: 10秒)</div>
-          <div class="skill-desc">6秒間、落下スピード2倍 ＆ 獲得ポイント2倍</div>
+          <div class="skill-desc">10秒間、落下スピード2倍 ＆ 獲得ポイント2倍</div>
         </div>
       </div>
 
@@ -476,7 +474,7 @@
       </div>
     </div>
 
-    <!-- ポーズ（中断）画面 -->
+    <!-- ポーズ画面 -->
     <div id="pause-screen" class="screen-overlay hidden">
       <h1>PAUSED</h1>
       <p class="subtitle">ゲームが一時停止されています</p>
@@ -553,19 +551,19 @@
     let ripples = [];
     let floatTexts = [];
 
-    const targetSequence = ['U', 'X', '王', '子'];
-    let currentSeqIndex = 0;
+    // 順不同管理用のSet（現在セット中の文字）
+    let collectedChars = new Set();
 
     let selectedSkill = 'fever';
     let isSkillActive = false;
     let skillDurationLeft = 0;
     let skillCooldownLeft = 0;
 
-    // ハイリスク型のCTを10秒に変更
+    // スキル効果時間を全10秒に統一
     const SKILL_CONFIG = {
-      fever: { duration: 6, cooldown: 20 },
-      allmighty: { duration: 6, cooldown: 30 },
-      highrisk: { duration: 6, cooldown: 10 }
+      fever: { duration: 10, cooldown: 20 },
+      allmighty: { duration: 10, cooldown: 30 },
+      highrisk: { duration: 10, cooldown: 10 }
     };
 
     let isStunned = false;
@@ -603,7 +601,6 @@
     btnRestart.addEventListener('click', startGame);
     btnToHome.addEventListener('click', goHome);
 
-    // 中断（ポーズ）関連ボタン
     btnPause.addEventListener('click', pauseGame);
     btnResume.addEventListener('click', resumeGame);
     btnPauseRetry.addEventListener('click', startGame);
@@ -663,7 +660,7 @@
       resultScreen.classList.add('hidden');
       pauseScreen.classList.add('hidden');
       modalScreen.classList.add('hidden');
-      btnPause.classList.remove('hidden'); // 中断ボタンを表示
+      btnPause.classList.remove('hidden');
 
       gameState = 'PLAYING';
       score = 0;
@@ -671,8 +668,9 @@
       maxCombo = 0;
       lastComboMilestone = 0;
       timeLeft = 60;
-      currentSeqIndex = 0;
       stunCount = 0;
+
+      collectedChars.clear();
 
       items = [];
       particles = [];
@@ -704,7 +702,6 @@
         endGame();
       }
 
-      // スキル効果時間カウントダウン
       if (isSkillActive) {
         skillDurationLeft--;
         if (skillDurationLeft <= 0) {
@@ -712,7 +709,6 @@
         }
       }
 
-      // スキル発動直後から並行してCTをカウントダウン
       if (skillCooldownLeft > 0) {
         skillCooldownLeft--;
       }
@@ -746,10 +742,12 @@
       }
     }
 
+    // スロットの描画更新（順不同対応）
     function updateSequenceSlots() {
+      const chars = ['U', 'X', '王', '子'];
       for (let i = 0; i < 4; i++) {
         const slotEl = document.getElementById(`slot-${i}`);
-        if (i < currentSeqIndex) {
+        if (collectedChars.has(chars[i])) {
           slotEl.classList.add('active');
         } else {
           slotEl.classList.remove('active');
@@ -763,7 +761,6 @@
 
       isSkillActive = true;
       skillDurationLeft = SKILL_CONFIG[selectedSkill].duration;
-      // ボタンを押した瞬間からCTカウントダウンを開始
       skillCooldownLeft = SKILL_CONFIG[selectedSkill].cooldown;
 
       updateSkillButtonUI();
@@ -825,14 +822,31 @@
         return;
       }
 
+      let isDuplicate = collectedChars.has(item.char);
       let isCorrect = false;
 
+      // オールマイティー型発動中は、重複した文字でも未取得枠として自動処理
       if (selectedSkill === 'allmighty' && isSkillActive) {
         isCorrect = true;
-      } else if (item.char === targetSequence[currentSeqIndex]) {
-        isCorrect = true;
+        if (isDuplicate) {
+          const allChars = ['U', 'X', '王', '子'];
+          for (let c of allChars) {
+            if (!collectedChars.has(c)) {
+              collectedChars.add(c);
+              break;
+            }
+          }
+        } else {
+          collectedChars.add(item.char);
+        }
       } else {
-        isCorrect = false;
+        // 通常時：未取得の文字なら成功、取得済み（重複）ならミス
+        if (!isDuplicate) {
+          isCorrect = true;
+          collectedChars.add(item.char);
+        } else {
+          isCorrect = false;
+        }
       }
 
       if (isCorrect) {
@@ -852,21 +866,22 @@
 
         score += point;
 
-        currentSeqIndex++;
-        if (currentSeqIndex >= targetSequence.length) {
+        // 「U・X・王・子」の4文字が揃ったら完成！
+        if (collectedChars.size >= 4) {
           score += 100;
-          currentSeqIndex = 0;
+          collectedChars.clear();
           createPopIcon();
         }
 
         updateSequenceSlots();
         createParticles(item.x, item.y, '#1c1c1e');
       } else {
+        // 重複タップ -> コンボ＆取得スロットリセット
         combo = 0;
-        currentSeqIndex = 0;
+        collectedChars.clear();
         updateSequenceSlots();
         createParticles(item.x, item.y, '#ff3b30');
-        createFloatText(item.x, item.y, 'COMBO RESET!');
+        createFloatText(item.x, item.y, 'DUPLICATE! RESET!');
       }
 
       items = items.filter(i => i !== item);
@@ -875,7 +890,7 @@
 
     function triggerStun() {
       combo = 0;
-      currentSeqIndex = 0;
+      collectedChars.clear();
       updateSequenceSlots();
       stunCount++;
       isStunned = true;
@@ -1031,7 +1046,7 @@
       clearInterval(gameTimer);
       if (animFrameId) cancelAnimationFrame(animFrameId);
 
-      btnPause.classList.add('hidden'); // ポーズボタン非表示
+      btnPause.classList.add('hidden');
 
       finalScore.innerText = score;
 
